@@ -1,9 +1,4 @@
-// this example will play a track and then 
-// every five seconds play another track
-//
-// it expects the sd card to contain these three mp3 files
-// but doesn't care whats in them
-//
+// it expects the sd card to contain these three mp3 files but doesn't care whats in them
 // sd:/mp3/0001.mp3
 // sd:/mp3/0002.mp3
 // sd:/mp3/0003.mp3
@@ -14,16 +9,13 @@
 #include <WiFiClient.h>
 #include <ESP8266WebServer.h>
 
-
 const char *ssid = "****";
 const char *password = "****";
-
 
 ESP8266WebServer server(80);
 
 // implement a notification class,
 // its member methods will get called 
-//
 class Mp3Notify
 {
 public:
@@ -31,7 +23,7 @@ public:
   {
     // see DfMp3_Error for code meaning
     Serial.println();
-    Serial.print("Com Error ");
+    Serial.print(F("Com Error "));
     Serial.println(errorCode);
   }
 
@@ -64,191 +56,205 @@ public:
   }
 };
 
-// instance a DFMiniMp3 object, 
-// defined with the above notification class and the hardware serial class
-//
-//DFMiniMp3<HardwareSerial, Mp3Notify> mp3(Serial1);
+SoftwareSerial swSerial(D1, D2); // RX, TX
+DFMiniMp3<SoftwareSerial, Mp3Notify> mp3(swSerial);
 
-// Some arduino boards only have one hardware serial port, so a software serial port is needed instead.
-// comment out the above definition and uncomment these lines
-SoftwareSerial secondarySerial(D1, D2); // RX, TX
-DFMiniMp3<SoftwareSerial, Mp3Notify> mp3(secondarySerial);
-
-#define BUSY_PIN D5
+#define BUSY_PIN   D5  // BUSY pin of the DF MP3 player to WEMOS
+#define BLTIN_LED  D4  // WEMOS built-in LED
 
 void setup() 
 {
-  pinMode(D4, OUTPUT);
-  digitalWrite(D4, HIGH);
   Serial.begin(115200);
-  digitalWrite(D4, LOW);
-  delay(150);
-  digitalWrite(D4, HIGH);
+
+  pinMode(BUSY_PIN, INPUT);
+  
+  pinMode(BLTIN_LED, OUTPUT);
+  digitalWrite(BLTIN_LED, HIGH);
+
+  Serial.println(F("Initializing MP3 module..."));
+  mp3.begin();
+  Serial.println(F("done."));
+  
+  SetupWLAN();
+}
+
+void SetupWLAN(void)
+{
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
   Serial.print(F("Connecting to WIFI ..."));
-  digitalWrite(D4, LOW);
-  delay(150);
-  digitalWrite(D4, HIGH);
+
   // Wait for connection
   while (WiFi.status() != WL_CONNECTED) 
   {
-    digitalWrite(D4, LOW);
-    delay(100);
-    digitalWrite(D4, HIGH);
-    Serial.print(".");
+    digitalWrite(BLTIN_LED, LOW);
+    waitMilliseconds(50);
+    digitalWrite(BLTIN_LED, HIGH);
+    Serial.print(F("."));
+    waitMilliseconds(50);
   }
+  
   Serial.println(F(" connection successful!"));
 
-  
   server.on("/", handleRoot);
   server.on("/VolUp", handleVolUp);
   server.on("/VolDown", handleVolDown);
   server.on("/Play", handlePlay);
   server.on("/Stop", handleStop);
-  server.on("/CheckPlaying", handleCheckPlaying);
   server.on("/Pause", handlePause);
   server.on("/PrevTrack", handlePrevTrack);
-  server.on("/NextTrack", handleNextTrack);
-  
+  server.on("/NextTrack", handleNextTrack);  
+  server.on("/ChangeEq", handleSetEq);
+
   //server.on("/inline", []() {
   //  server.send(200, "text/plain", "this works as well");
   //});
-  
+
   server.onNotFound(handleNotFound);
   server.begin();
+
+  waitMilliseconds(10);
   
   Serial.println("");
-  Serial.print("Connected to ");
+  Serial.print(F("Connected to "));
   Serial.println(ssid);
-  Serial.print("IP address: ");
+  Serial.print(F("IP address: "));
   Serial.println(WiFi.localIP());
-  
-  pinMode(BUSY_PIN, INPUT);
-  Serial.println(F("Initializing MP3 module..."));
-  
-  mp3.begin();
-
-  // show OK
-  digitalWrite(D4, LOW);
-  delay(500);
-  digitalWrite(D4, HIGH);
-  delay(100);
-  digitalWrite(D4, LOW);
-  delay(500);
-  digitalWrite(D4, HIGH);
-  delay(10);
 }
 
 void waitMilliseconds(uint16_t msWait)
 {
   uint32_t start = millis();
   
+  // calling mp3.loop() periodically allows for notifications 
+  // to be handled without interrupts
   while ((millis() - start) < msWait)
   {
-    // calling mp3.loop() periodically allows for notifications 
-    // to be handled without interrupts
     mp3.loop(); 
     delay(1);
   }
 }
 
-void HTTP(void)
+void HTTPRcvLED(void)
 {
-  digitalWrite(D4, LOW);
-  delay(50);
-  digitalWrite(D4, HIGH);
+  digitalWrite(BLTIN_LED, LOW);
+  waitMilliseconds(10);
+  digitalWrite(BLTIN_LED, HIGH);
+}
+
+void ShowOK(void)
+{
+  // show OK, two times 'slow' blinking
+  digitalWrite(BLTIN_LED, LOW);
+  waitMilliseconds(500);
+  digitalWrite(BLTIN_LED, HIGH);
+  waitMilliseconds(100);
+  digitalWrite(BLTIN_LED, LOW);
+  waitMilliseconds(500);
+  digitalWrite(BLTIN_LED, HIGH);
+  waitMilliseconds(10);
+}
+
+void ShowError(void)
+{
+  // show Error, fast blinking 3 times
+  digitalWrite(BLTIN_LED, LOW);
+  waitMilliseconds(50);
+  digitalWrite(BLTIN_LED, HIGH);
+  waitMilliseconds(50);
+  digitalWrite(BLTIN_LED, LOW);
+  waitMilliseconds(50);
+  digitalWrite(BLTIN_LED, HIGH);
+  waitMilliseconds(50);  
+  digitalWrite(BLTIN_LED, LOW);
+  waitMilliseconds(50);
+  digitalWrite(BLTIN_LED, HIGH);
+}
+
+void redirectHTTP()
+{
+  HTTPRcvLED();
+  waitMilliseconds(50);
+  server.sendHeader("Location", String("/"), true);
+  server.send ( 302, "text/plain", "");
+  waitMilliseconds(1);  
 }
 
 void handlePlay()
 {
-  HTTP();
   mp3.playMp3FolderTrack(1);
-  delay(100);
-  server.sendHeader("Location", String("/"), true);
-  server.send ( 302, "text/plain", "");
-  delay(1);
+  redirectHTTP();
 }
 
 void handlePrevTrack()
 {
-  HTTP();
   mp3.prevTrack();
-  delay(100);
-  server.sendHeader("Location", String("/"), true);
-  server.send ( 302, "text/plain", "");
-  delay(1);
+  redirectHTTP();
 }
 
 void handleNextTrack()
 {
-  HTTP();
   mp3.nextTrack();
-  delay(100);
-  server.sendHeader("Location", String("/"), true);
-  server.send ( 302, "text/plain", "");
-  delay(1);
+  redirectHTTP();
 }
 
 void handleStop()
 {
-  HTTP();
   mp3.stop();
-  delay(100);
-  server.sendHeader("Location", String("/"), true);
-  server.send ( 302, "text/plain", "");
-  delay(1);
+  redirectHTTP();
 }
 
 void handlePause()
 {
-  HTTP();
   mp3.pause();
-  delay(100);
-  server.sendHeader("Location", String("/"), true);
-  server.send ( 302, "text/plain", "");
-  delay(1);
+  redirectHTTP();
 }
 
 
 void handleVolUp()
 {
-  HTTP();
-  uint16_t volume = mp3.getVolume();
-  volume += 5;
-  if (volume > 40)
-  {
-    volume = 40;
-  }
-  Serial.print("volume ");
-  Serial.println(volume);
-  mp3.setVolume(volume);
-  delay(100);
-  server.sendHeader("Location", String("/"), true);
-  server.send ( 302, "text/plain", "");
-  delay(1);
+  mp3.increaseVolume();
+  redirectHTTP();
 }
 
 void handleVolDown()
 {
-  HTTP();
-  uint16_t volume = mp3.getVolume();
-  volume -= 5;
-  if (volume < 5)
+  mp3.decreaseVolume();
+  redirectHTTP();
+}
+
+volatile byte EQ_IDX = 1;
+
+void handleSetEq(void)
+{
+  DfMp3_Eq eq = DfMp3_Eq_Normal;
+  
+  EQ_IDX++;
+  
+  if (EQ_IDX > 6)
   {
-    volume = 0;
+    EQ_IDX = 1;
   }
-  Serial.print("volume ");
-  Serial.println(volume);
-  mp3.setVolume(volume);
-  delay(100);
-  server.sendHeader("Location", String("/"), true);
-  server.send ( 302, "text/plain", "");
-  delay(1);
+  
+  switch(EQ_IDX)
+  {
+    case 1:  eq = DfMp3_Eq_Normal;  break;
+    case 2:  eq = DfMp3_Eq_Pop;     break;
+    case 3:  eq = DfMp3_Eq_Rock;    break;
+    case 4:  eq = DfMp3_Eq_Jazz;    break;
+    case 5:  eq = DfMp3_Eq_Classic; break;
+    case 6:  eq = DfMp3_Eq_Bass;    break;
+    default: Serial.println(F("EQ_IDX is not defined!")); break;
+  }
+
+  mp3.setEq(eq);
+  redirectHTTP();
 }
 
 void handleRoot() 
 {
+  HTTPRcvLED();
+
   String s = "<html>\
               <head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
               <link rel=\"icon\" href=\"data:,\">\
@@ -263,6 +269,7 @@ void handleRoot()
                 <p><a href=\"/Pause\"><button class=\"btn\">PAUSE</button></a></p>\
                 <p><a href=\"/PrevTrack\"><button class=\"btn\">PREV. TRACK</button></a></p>\
                 <p><a href=\"/NextTrack\"><button class=\"btn\">NEXT TRACK</button></a></p>\
+                <p><a href=\"/ChangeEq\"><button class=\"btn\">CHANGE EQ</button></a></p>\
                 <p><h1>Volume</h1></p>\
                 <p><a href=\"/VolUp\"><button class=\"btn\">Volume UP</button></a></p>\
                 <p><a href=\"/VolDown\"><button class=\"btn\">Volume DOWN</button></a></p>\
@@ -277,6 +284,22 @@ void handleRoot()
   s += "<p><h1>Number of tracks:</h1><p>";
   uint16_t count = mp3.getTotalTrackCount();
   s += String(count);
+  /*
+  s += "<p><h1>EQ used:</h1><p>";
+  DfMp3_Eq eq = mp3.getEq();
+
+  
+  switch(eq)
+  {
+    case DfMp3_Eq_Normal:  s += "Normal";  break;
+    case DfMp3_Eq_Pop:     s += "Pop";     break;
+    case DfMp3_Eq_Rock:    s += "Rock";    break;
+    case DfMp3_Eq_Jazz:    s += "Jazz";    break;
+    case DfMp3_Eq_Classic: s += "Classic"; break;
+    case DfMp3_Eq_Bass:    s += "Bass";    break;
+    default: Serial.println(F("EQ_IDX is not defined!")); break;
+  }
+  */
   s += "</body></html>";
   char CharBuffer[s.length() + 1];
   s.toCharArray(CharBuffer, s.length());          
@@ -284,60 +307,9 @@ void handleRoot()
   server.send(200, "text/html", CharBuffer);
 }
 
-void handleCheckPlaying() 
-{
-  HTTP();
-  char temp[500];
-  if (digitalRead(BUSY_PIN) == HIGH)
-  {
-    sprintf(temp, 
-           "<html>\
-              <head>\
-                <meta http-equiv='refresh' content='5'/>\
-                <title>ESP8266 Demo</title>\
-                <style>\
-                  body { background-color: #cccccc; font-family: Arial, Helvetica, Sans-Serif; Color: #000088; }\
-                </style>\
-              </head>\
-              <body>\
-                <h1>Hello from ESP8266!</h1>\
-                <h2>MP3 Player is NOT playing!</h2>\
-              </body>\
-            </html>");
-  } else
-  {
-    sprintf(temp, 
-           "<html>\
-              <head>\
-                <meta http-equiv='refresh' content='5'/>\
-                <title>ESP8266 Demo</title>\
-                <style>\
-                  body { background-color: #cccccc; font-family: Arial, Helvetica, Sans-Serif; Color: #000088; }\
-                </style>\
-              </head>\
-              <body>\
-                <h1>Hello from ESP8266!</h1>\
-                <h2>MP3 Player is playing!</h2>\
-              </body>\
-            </html>");
-  }
-  
-  server.send(200, "text/html", temp);
-}
-
 void handleNotFound() 
 {
-  digitalWrite(D4, LOW);
-  delay(50);
-  digitalWrite(D4, HIGH);
-  delay(50);
-  digitalWrite(D4, LOW);
-  delay(50);
-  digitalWrite(D4, HIGH);
-  delay(50);
-  digitalWrite(D4, LOW);
-  delay(50);
-  digitalWrite(D4, HIGH);
+  HTTPRcvLED();
   String message = "File Not Found\n\n";
   message += "URI: ";
   message += server.uri();
@@ -347,7 +319,8 @@ void handleNotFound()
   message += server.args();
   message += "\n";
 
-  for (uint8_t i = 0; i < server.args(); i++) {
+  for (uint8_t i = 0; i < server.args(); i++) 
+  {
     message += " " + server.argName(i) + ": " + server.arg(i) + "\n";
   }
 
@@ -357,7 +330,7 @@ void handleNotFound()
 void loop() 
 {
   mp3.loop(); 
-  delay(1);
+  waitMilliseconds(1);
   server.handleClient();
-  delay(1);
+  waitMilliseconds(1);
 }
