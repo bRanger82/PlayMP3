@@ -124,11 +124,11 @@ void SetupWLAN(void)
 
 void waitMilliseconds(uint16_t msWait)
 {
-  uint32_t start = millis();
+  uint32_t startPt = millis();
   
   // calling mp3.loop() periodically allows for notifications 
   // to be handled without interrupts
-  while ((millis() - start) < msWait)
+  while ((millis() - startPt) < msWait)
   {
     mp3.loop(); 
     delay(1);
@@ -176,7 +176,7 @@ void redirectHTTP()
   HTTPRcvLED();
   waitMilliseconds(50);
   server.sendHeader("Location", String("/"), true);
-  server.send ( 302, "text/plain", "");
+  server.send(302, "text/plain", "");
   waitMilliseconds(1);  
 }
 
@@ -209,7 +209,6 @@ void handlePause()
   mp3.pause();
   redirectHTTP();
 }
-
 
 void handleVolUp()
 {
@@ -284,10 +283,9 @@ void handleRoot()
   s += "<p><h1>Number of tracks:</h1><p>";
   uint16_t count = mp3.getTotalTrackCount();
   s += String(count);
-  /*
+  
   s += "<p><h1>EQ used:</h1><p>";
-  DfMp3_Eq eq = mp3.getEq();
-
+  DfMp3_Eq eq = mp3.getEq(); // --> change getEq() to " return (DfMp3_Eq)listenForReply(0x44); " in DFMiniMp3.h
   
   switch(eq)
   {
@@ -297,9 +295,9 @@ void handleRoot()
     case DfMp3_Eq_Jazz:    s += "Jazz";    break;
     case DfMp3_Eq_Classic: s += "Classic"; break;
     case DfMp3_Eq_Bass:    s += "Bass";    break;
-    default: Serial.println(F("EQ_IDX is not defined!")); break;
+    default: Serial.println(F("Unknown return value from getEq()!")); break;
   }
-  */
+  
   s += "</body></html>";
   char CharBuffer[s.length() + 1];
   s.toCharArray(CharBuffer, s.length());          
